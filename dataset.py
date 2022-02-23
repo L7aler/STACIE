@@ -1,7 +1,7 @@
 import numpy as np
 from torch.utils.data import Dataset
 
-class SolarDataset(Dataset):
+class Solar_Dataset(Dataset):
     def __init__(self,source="from_file",dat_file=None,data_arr=None,label_arr=None,test=False):
         super().__init__()
         self.test = test
@@ -66,19 +66,19 @@ def parse_dataset(dataset):
 
     sol_list = []
     
-    if type(dataset) == solar_dataset:
+    if type(dataset) == Solar_Dataset:
         for l in np.unique(dataset.label):
             args = np.argwhere(dataset.label == l) #finds all of the indices where the given label is l and returns an array of these indices
     
-            sol_list.append(solar_dataset(source="numpy",data_arr=dataset.data[args],label_arr=dataset.label[args]))
+            sol_list.append(Solar_Dataset(source="numpy",data_arr=dataset.data[args],label_arr=dataset.label[args]))
 
         return sol_list
     elif type(dataset) == str:
-        s_dataset = solar_dataset(source="from_file",dat_file=dataset)
+        s_dataset = Solar_Dataset(source="from_file",dat_file=dataset)
 
         for l in np.unique(s_dataset.label):
             args = np.argwhere(s_dataset.label == l)
 
-            sol_list.append(solar_dataset(source="numpy",data_arr=s_dataset.data[args],label_arr=s_dataset.label[args]))
+            sol_list.append(Solar_Dataset(source="numpy",data_arr=s_dataset.data[args],label_arr=s_dataset.label[args]))
 
         return sol_list
