@@ -70,11 +70,11 @@ def parse_dataset(dataset):
         for l in np.unique(dataset.label):
             args = np.argwhere(dataset.label == l) #finds all of the indices where the given label is l and returns an array of these indices
     
-            sol_list.append(Solar_Sataset(source="numpy",data_arr=dataset.data[args],label_arr=dataset.label[args]))
+            sol_list.append(Solar_Dataset(source="numpy",data_arr=dataset.data[args],label_arr=dataset.label[args]))
 
         return sol_list
     elif type(dataset) == str:
-        s_dataset = Solar_Sataset(source="from_file",dat_file=dataset)
+        s_dataset = Solar_Dataset(source="from_file",dat_file=dataset)
 
         for l in np.unique(s_dataset.label):
             args = np.argwhere(s_dataset.label == l)
