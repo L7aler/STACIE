@@ -1,7 +1,9 @@
 import numpy as np
 from astropy.io.fits import getdata
 import os,argparse
-from scipy.misc import imresize
+# from scipy.misc import imresize
+# instead of imresize use numpy.array(Image.fromarray(arr).resize())
+from PIL import Image
 from tqdm import tqdm
 
 def train_test_data(dataset,percentage_split=10,save_dir="./"):
@@ -35,7 +37,8 @@ def train_test_data(dataset,percentage_split=10,save_dir="./"):
                         raise bad_data() #skip over images with faults in the data
             except bad_data:
                 continue
-            tmp = imresize(tmp,(256,256),interp="bicubic") #resizes the images to 256x256 pixels using bicubic interpolation
+            tmp = np.array(Image.fromarray(tmp).resize(256, 256))
+            #tmp = imresize(tmp,(256,256),interp="bicubic") #resizes the images to 256x256 pixels using bicubic interpolation
             tmp = tmp.flatten() #flatten the image to a 1D vector for easier storage in the .npz file
             tmp = np.insert(tmp,0,i)
             if (j % percentage_split) == 0:
@@ -53,11 +56,12 @@ def train_test_data(dataset,percentage_split=10,save_dir="./"):
     np.savez_compressed(save_dir+"solar_test_data.npz",data=test_arr)
     print("The training and testing data files have been created.")
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset",help="The path to the dataset to be loaded in.",default=None)
     parser.add_argument("--percent_split",help="The percentage of the dataset to put in the validation.",default=10)
     parser.add_argument("--save_dir",help="The directory to save the prepped datasets to.",default="./")
     args = parser.parse_args()
-
+    
     train_test_data(dataset=args.dataset,percentage_split=args.percent_split,save_dir=args.save_dir)

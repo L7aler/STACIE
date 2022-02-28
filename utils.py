@@ -4,7 +4,7 @@ from model import SolarClassifier
 from torch.utils.data import DataLoader
 import numpy as np
 from tqdm import tqdm
-import sunpy.cm as cm
+import sunpy.visualization.colormaps as cm
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
 import os, html

@@ -55,10 +55,11 @@ class SolarClassifier(nn.Module):
             nn.Dropout(),
             nn.Linear(4096,5)
         )
-
+        """
         for m in self.modules():
             if not Solar_Classifier:
                 kaiming_normal_(m.weight,nonlinearity="relu")
+        """
 
     def forward(self,x):
         out = self.layer1(x)
