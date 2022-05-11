@@ -98,33 +98,32 @@ if __name__ == "__main__":
         ENCODER = str(args.encoder[0])
 
     FLUX_DATA_DIR = os.path.join(os.getcwd(), 'data', 'magnetic_flux_area_data')
-    LSTM_DATA_DIR = os.path.join(os.getcwd(), 'data', 'lstm_data')
+    LSTM_DATA_DIR = os.path.join(os.getcwd(), 'data', 'lstm_data', 'multi_label_classification')
     
     DEV = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
     t_encoding_dim = 8
-    e_layers = 2
-    d_layers = 2
+    e_layers = 3
+    d_layers = 3
     
     ###### load dataset ######
 
     if SINE_DATA or POLY_DATA:
         FTR_SIZE = SEQ_TARGET_SIZE
-        
         if SINE_DATA:
             DSET_TYPE = 'sin'
             transformer_save_file = os.path.join(os.getcwd(), 'model_params', 'sinusoid_transformer_params')
         if POLY_DATA:
             DSET_TYPE = 'pol'
             transformer_save_file = os.path.join(os.getcwd(), 'model_params', 'poly_transformer_params')
-        
+            
         train_dset, test_dset, eval_dset = dst.example_train_test_eval(DSET_TYPE, 
                                                                        n_sequences=N_SEQUENCES, source_size=SEQ_SOURCE_SIZE, 
                                                                        target_size=SEQ_TARGET_SIZE, 
                                                                        future_size=FTR_SIZE, add_noise=True, seed=42, device=DEV)
         eval_data = DataLoader(eval_dset, batch_size=BATCH_SIZE)
         TARGET_SIZE = SEQ_TARGET_SIZE
-        
+          
     if not SINE_DATA and not POLY_DATA and FLUX_IDX is not None:
         transformer_save_file = os.path.join(os.getcwd(), 'model_params', 'flux_transformer_params')
         train_dset, test_dset, eval_dset = dst.flux_train_test_eval(FLUX_DATA_DIR, FLUX_IDX, 
@@ -137,7 +136,7 @@ if __name__ == "__main__":
     model = trf.FluxTransformer(train_dset, test_dset,
                                 model_d=MODEL_DIM, nheads=NHEADS, encoding=ENCODER,
                                 time_encoding_dim=t_encoding_dim, enc_layers=e_layers, dec_layers=d_layers,
-                                prediction_distance=25, epochs=EPOCHS, learning_rate=5e-3, gamma=0.9, device=DEV).to(DEV)
+                                prediction_distance=25, epochs=EPOCHS, learning_rate=1e-3, gamma=0.97, device=DEV).to(DEV)
 
     ###### Train or load the model ######
     
@@ -161,5 +160,5 @@ if __name__ == "__main__":
     ###### Plot some examples ######
     
     test_src, test_tgt, test_ftr = next(iter(eval_data))
-    model.show_example(test_src, test_tgt, test_ftr)
-    model.plot_loss()
+    model.show_example(test_src, test_tgt, test_ftr, plot_folder='plots')
+    model.plot_loss(plot_folder='plots')

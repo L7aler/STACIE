@@ -169,19 +169,13 @@ class FluxTransformer(nn.Module):
         self.encoding = encoding
         self.positional_encoding, self.delay_buffer = self.set_encoding(encoding, data_dim=self.data_dim, model_dim=self.model_dim,
                                                                         time_encoding_dim=self.time_encoding_dim, device=self.device)
-
+        
         # Mask for the target
         self.tgt_mask = self._generate_square_subsequent_mask(self.target_size).to(self.device)
 
         # Transformer model (pytorch's implementation of the transformer)
         self.transformer = nn.Transformer(d_model=self.model_dim, nhead=nheads, num_encoder_layers=enc_layers,
                                           num_decoder_layers=dec_layers, dropout=0.2, batch_first=True)
-
-        # Previous model (need to change the src and tgt for this to work properly)
-        # self.src_mask = self._generate_square_subsequent_mask(self.source_size).to(self.device)
-        # self.encoder_layer = nn.TransformerEncoderLayer(d_model=self.model_dim, nhead=1, dropout=0.1,
-        #                                                 dim_feedforward=2048, batch_first=True)
-        # self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=2)
 
         self.decoder = nn.Linear(self.model_dim, self.data_dim) #self.data_dim now this is flux and area, this are the predicted quantities
         #change to the number of lables to apply to Louis' data
@@ -327,7 +321,8 @@ class FluxTransformer(nn.Module):
                 seq[:, -1] = out[:, -1]
         return seq[:, -self.future_size:]
 
-    def show_example(self, src, tgt, ftr):
+    def show_example(self, src, tgt, ftr, plot_folder='', plot_name='transformer_results.png'):
+        plot_path = os.path.join(os.getcwd(), plot_folder, plot_name)
         self.eval()
         # Timesteps
         src_t = np.arange(self.source_size)
@@ -353,10 +348,11 @@ class FluxTransformer(nn.Module):
                 ax[i, j].set_xlabel('step')
                 ax[i, j].set_ylabel('flux')
         plt.tight_layout()
-        plt.savefig('transformer_results.png')
+        plt.savefig(plot_path)
         plt.show()
         
-    def plot_loss(self):
+    def plot_loss(self, plot_folder='', plot_name='transformer_loss.png'):
+        plot_path = os.path.join(os.getcwd(), plot_folder, plot_name)
         epoch_array = np.arange(self.epochs)
         
         fig = plt.figure()
@@ -366,5 +362,5 @@ class FluxTransformer(nn.Module):
         ax.set_xlabel('epochs')
         ax.set_ylabel('loss')
         ax.legend(loc='upper right')
-        plt.savefig('transformer_loss.png')
+        plt.savefig(plot_path)
         plt.show()
