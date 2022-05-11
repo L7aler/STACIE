@@ -3,3 +3,7 @@
 /imgs
 /.ipynb_checkpoints
 /__pycache__
+/flux_prediction/.ipynb_checkpoints
+/flux_prediction/data
+/flux_prediction/model_params
+/flux_prediction/__pycache__
