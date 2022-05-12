@@ -103,8 +103,8 @@ if __name__ == "__main__":
     DEV = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
     t_encoding_dim = 8
-    e_layers = 3
-    d_layers = 3
+    e_layers = 2
+    d_layers = 2
     
     ###### load dataset ######
 

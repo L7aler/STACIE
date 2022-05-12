@@ -8,6 +8,22 @@ from torch.utils.data import DataLoader, Dataset
 
 ###### load dataset ######
 
+def mlabel_train_test_eval(data_dir, test_fraction=0.33, seed=42, device=torch.device("cpu")):
+    train_dset = class_call(data_dir, 
+                            test_fraction=test_fraction,
+                            seed=seed,
+                            device=device)
+    test_dset = class_call(data_dir, set_idx, 
+                           test_fraction=test_fraction,
+                           seed=seed,
+                           test_set=True,
+                           device=device)
+    eval_dset = class_call(data_dir, set_idx, 
+                           test_fraction=test_fraction,
+                           test_set=True, seed=seed+1,
+                           device=device)
+    return train_dset, test_dset, eval_dset
+
 def flux_train_test_eval(data_dir, set_idx, add_gradients=False,
                          test_fraction=0.33, seed=42, device=torch.device("cpu")):
     if set_idx == 4:
@@ -77,6 +93,49 @@ def normalize(sequences):
     normalized_sequences = (sequences - mean) / std
     return normalized_sequences
 
+
+###### multilabel dataset ######
+
+class MultiLabelDataset(Dataset):
+    def __init__(self, data_dir,
+                 test_set=False, test_fraction=0.33, seed=42, device=torch.device("cpu")):
+        self.set_dir = f'set_{set_idx}'
+        self.device = device
+
+        # Load data.
+        # Sources have shape [n_sequences, source_length, n_features]
+        # Targets have shape [n_sequences, target_length, n_features]
+        
+        if test_set:
+            sources = np.load(os.path.join(data_dir, 'val_input.npy'))
+            targets = np.load(os.path.join(data_dir, 'val_input.npy'))
+        else:
+            sources = np.load(os.path.join(data_dir, 'train_input.npy'))
+            targets = np.load(os.path.join(data_dir, 'train_target.npy'))
+            
+        self.source_size = len(sources[0])
+        self.target_size = len(targets[0])
+
+        # Store data shape
+        self.n_sequences = len(sources)
+        self.sequence_length = self.source_size + self.target_size #this is source_size + target_size
+        self.n_features = len(sources[0][0])
+
+        # The source for the model will be the sequence, but with its target data points masked.
+        # sources = sequences.copy()
+        # sources[:, -target_size - future_size:-future_size, :] = 0
+
+
+        # Determine random training and test indices
+        self.test_size = int(test_fraction * self.n_sequences)
+        np.random.seed(seed)
+        test_sample = np.random.choice(np.arange(self.n_sequences), self.test_size, replace=False)
+        train_sample = np.delete(np.arange(self.n_sequences), test_sample, axis=0)
+
+        # Select train or test set
+        self.source_data = sources[test_sample]
+        self.target_data = targets[test_sample]
+        
 
 ###### dummy dataset classes ######
 
