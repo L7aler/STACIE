@@ -16,8 +16,8 @@ if __name__ == "__main__":
     ###### define parser ######
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--train', 
-                        help='Trains the transformer', 
+    parser.add_argument('--mlabel', 
+                        help='Trains the transformer to predict flare types', 
                         action='store_true')
     parser.add_argument('--load', 
                         help='Loads a pretrained network', 
@@ -53,10 +53,15 @@ if __name__ == "__main__":
 
     ###### parse arguments ######
     
-    TRAIN = args.train
+    MLABEL = args.mlabel
     LOAD = args.load
     POLY_DATA = args.poly_data
     SINE_DATA = args.sine_data
+    
+    if LOAD:
+        TRAIN = False
+    else:
+        TRAIN = True
     
     if args.data_sequence == None:
         N_SEQUENCES = 1000
@@ -131,12 +136,36 @@ if __name__ == "__main__":
         eval_data = DataLoader(eval_dset, batch_size=BATCH_SIZE)
         TARGET_SIZE = train_dset.get_target_size()
         
+    if MLABEL:
+        transformer_save_file = os.path.join(os.getcwd(), 'model_params', 'mlabel_transformer_params')
+        train_dset, test_dset, eval_dset = dst.mlabel_train_test_eval(LSTM_DATA_DIR, seed=12, device=DEV)
+        eval_data = DataLoader(eval_dset, batch_size=BATCH_SIZE)
+        TARGET_SIZE = train_dset.get_target_size()
+    
+    print('')
+    
+    if POLY_DATA:
+        print('Training transformer with polynomial dataset')
+    elif SINE_DATA:
+        print('Training transformer with sinusoidal dataset')
+    elif MLABEL:
+        print('Training transformer for flare class prediction')
+    elif FLUX_IDX is not None:
+        print('Training transformer with flux dataset, set {}'.format(FLUX_IDX))
+        
+    print('')
+    
+    print('Device: {}\n'.format(DEV))
+    print('+++ Transformer parameters +++')
+    print('Epochs: {}\nTarget size: {}\nModel dimension: {}'.format(EPOCHS, TARGET_SIZE, MODEL_DIM))
+    print('Heads: {}\nBatch size: {}'.format(NHEADS, BATCH_SIZE))
+        
     ##### load the model ######
     
     model = trf.FluxTransformer(train_dset, test_dset,
-                                model_d=MODEL_DIM, nheads=NHEADS, encoding=ENCODER,
+                                multilabel=MLABEL, model_d=MODEL_DIM, nheads=NHEADS, encoding=ENCODER,
                                 time_encoding_dim=t_encoding_dim, enc_layers=e_layers, dec_layers=d_layers,
-                                prediction_distance=25, epochs=EPOCHS, learning_rate=1e-3, gamma=0.97, device=DEV).to(DEV)
+                                prediction_distance=TARGET_SIZE, epochs=EPOCHS, learning_rate=1e-3, gamma=0.97, device=DEV).to(DEV)
 
     ###### Train or load the model ######
     
@@ -151,14 +180,15 @@ if __name__ == "__main__":
         print('Encoder: {}'.format(ENCODER))
     if LOAD:
         model.load_model(transformer_save_file)
-        
-    print('Device: {}'.format(DEV))
-    print('Parameters used:')
-    print('Epochs: {}\nTarget size: {}\nModel dimension: {}'.format(EPOCHS, TARGET_SIZE, MODEL_DIM))
-    print('Heads: {}\nBatch size: {}'.format(NHEADS, BATCH_SIZE))
+  
 
     ###### Plot some examples ######
     
-    test_src, test_tgt, test_ftr = next(iter(eval_data))
-    model.show_example(test_src, test_tgt, test_ftr, plot_folder='plots')
-    model.plot_loss(plot_folder='plots')
+    if MLABEL:
+        #test_src, test_tgt = next(iter(eval_data))
+        model.show_example(test_src, test_tgt, test_ftr, plot_folder='plots')
+        model.plot_loss(plot_folder='plots')
+    else:
+        test_src, test_tgt, test_ftr = next(iter(eval_data))
+        model.show_example(test_src, test_tgt, test_ftr, plot_folder='plots')
+        model.plot_loss(plot_folder='plots')

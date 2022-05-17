@@ -138,12 +138,13 @@ class FluxTransformer(nn.Module):
     device: device to use
     """
 
-    def __init__(self, train_dset, test_dset,
+    def __init__(self, train_dset, test_dset, multilabel=False,
                  model_d=32, nheads=1, encoding='pos', time_encoding_dim=8, 
                  enc_layers=1, dec_layers=1, prediction_distance=1, epochs=100,
                  batch_size=64, learning_rate=1e-4, gamma=0.99, device=torch.device("cpu")):
         
         super(FluxTransformer, self).__init__()
+        self.multilabel = multilabel
         self.epochs = epochs
         self.device = device
         self.prediction_distance = prediction_distance
@@ -155,9 +156,14 @@ class FluxTransformer(nn.Module):
         # Store some dimensions of the data
         self.sequence_length = train_dset.get_sequence_length()
         self.target_size = train_dset.get_target_size()
-        self.future_size = train_dset.get_future_size()
-        self.source_size = self.sequence_length - self.target_size - self.future_size #?????
-        self.data_dim = train_dset.get_n_features()
+        self.data_in_dim = train_dset.get_n_features()
+        if not self.multilabel:
+            self.data_out_dim = self.data_in_dim
+            self.future_size = train_dset.get_future_size()
+            self.source_size = self.sequence_length - self.target_size - self.future_size #?????
+        else:
+            self.source_size = 10
+            self.data_out_dim = 45
 
         # Feature dimension the transformer will use
         self.model_dim = model_d
@@ -167,7 +173,7 @@ class FluxTransformer(nn.Module):
 
         # Positional encoding type
         self.encoding = encoding
-        self.positional_encoding, self.delay_buffer = self.set_encoding(encoding, data_dim=self.data_dim, model_dim=self.model_dim,
+        self.positional_encoding, self.delay_buffer = self.set_encoding(encoding, data_dim=self.data_in_dim, model_dim=self.model_dim,
                                                                         time_encoding_dim=self.time_encoding_dim, device=self.device)
         
         # Mask for the target
@@ -177,14 +183,17 @@ class FluxTransformer(nn.Module):
         self.transformer = nn.Transformer(d_model=self.model_dim, nhead=nheads, num_encoder_layers=enc_layers,
                                           num_decoder_layers=dec_layers, dropout=0.2, batch_first=True)
 
-        self.decoder = nn.Linear(self.model_dim, self.data_dim) #self.data_dim now this is flux and area, this are the predicted quantities
+        self.decoder = nn.Linear(self.model_dim, self.data_out_dim)
         #change to the number of lables to apply to Louis' data
 
         # Decoder initialization (I just copied this, don't know if it helps much)
         self.init_weights()
 
         # Loss, optimizer and learning rate scheduler
-        self.loss_fn = nn.MSELoss(reduction='mean')  #change to cross entropy
+        if not self.multilabel:
+            self.loss_fn = nn.MSELoss(reduction='mean')
+        else:
+            self.loss_fn = nn.CrossEntropyLoss(reduction='mean')
         self.optimizer = optim.Adam([{'params': self.parameters()}], lr=learning_rate, weight_decay=1e-5)
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1, gamma=gamma)
         # self.scheduler = torch.optim.lr_scheduler.CyclicLR(self.optimizer, base_lr=1e-4, max_lr=0.1, step_size_up=100)
@@ -200,7 +209,7 @@ class FluxTransformer(nn.Module):
         elif encoding == 't2v':
             positional_encoding = nn.Sequential(SineActivation(time_encoding_dim, device), 
                                                 nn.Linear(time_encoding_dim + data_dim, model_dim))
-            self.delay_buffer = 0
+            delay_buffer = 0
         elif encoding == 'td':
             positional_encoding = nn.Sequential(TimeDelay(dim=time_encoding_dim, delay=1),
                                                 nn.Linear(time_encoding_dim * data_dim, model_dim))
@@ -215,7 +224,9 @@ class FluxTransformer(nn.Module):
 
     def forward(self, src, tgt):
         # Concatenate the source and target
+        #print(src.shape, tgt.shape)
         seq = torch.cat((src, tgt), dim=1)
+        #print(seq.shape)
 
         # Add positional encoding to each point in the sequence (this also changes the feature dimension to d_model)
         seq = self.positional_encoding(seq)
@@ -224,7 +235,7 @@ class FluxTransformer(nn.Module):
         src = seq[:, :self.source_size - self.delay_buffer]
 
         # (!) Use the points (target_size - 1) until the second to last point as the decoder input
-        decoder_input = seq[:, -self.target_size - self.prediction_distance:-self.prediction_distance]
+        decoder_input = seq[:, -self.target_size - self.prediction_distance :-self.prediction_distance]
 
         # Transformer model magic (out has the same shape as decoder_input)
         # The tgt_mask is the mask for decoder_input
@@ -259,14 +270,26 @@ class FluxTransformer(nn.Module):
             train_loss = []
 
             # Training
-            for (src, tgt, _) in tqdm(self.train_data, desc=f'Epoch {epoch}', total=n_train_batches):
-                self.optimizer.zero_grad()
-                output = self(src, tgt)
-                loss = self.loss_fn(output, tgt) #change to 
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.parameters(), 0.5)
-                self.optimizer.step()
-                train_loss.append(loss.item())
+            
+            if self.multilabel:
+                for (src, tgt) in tqdm(self.train_data, desc=f'Epoch {epoch}', total=n_train_batches):
+                    self.optimizer.zero_grad()
+                    output = self(src, tgt)
+                    loss = self.loss_fn(output, tgt) #change to 
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.parameters(), 0.5)
+                    self.optimizer.step()
+                    train_loss.append(loss.item())
+            else:
+                for (src, tgt, _) in tqdm(self.train_data, desc=f'Epoch {epoch}', total=n_train_batches):
+                    self.optimizer.zero_grad()
+                    output = self(src, tgt)
+                    loss = self.loss_fn(output, tgt) #change to 
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.parameters(), 0.5)
+                    self.optimizer.step()
+                    train_loss.append(loss.item())
+            
 
             current_mean_train_loss = np.mean(train_loss)
             self.mean_train_loss.append(current_mean_train_loss)
@@ -276,10 +299,16 @@ class FluxTransformer(nn.Module):
             test_loss = []
 
             # Validation
-            for (src, tgt, _) in tqdm(self.test_data, desc=f'Epoch {epoch}', total=n_test_batches):
-                output = self(src, tgt)
-                loss = self.loss_fn(output, tgt)
-                test_loss.append(loss.item())
+            if self.multilabel:
+                for (src, tgt) in tqdm(self.test_data, desc=f'Epoch {epoch}', total=n_test_batches):
+                    output = self(src, tgt)
+                    loss = self.loss_fn(output, tgt)
+                    test_loss.append(loss.item())
+            else:
+                for (src, tgt, _) in tqdm(self.test_data, desc=f'Epoch {epoch}', total=n_test_batches):
+                    output = self(src, tgt)
+                    loss = self.loss_fn(output, tgt)
+                    test_loss.append(loss.item())
 
             current_mean_test_loss = np.mean(test_loss)
             self.mean_test_loss.append(current_mean_test_loss)
@@ -299,6 +328,30 @@ class FluxTransformer(nn.Module):
 
     def save_model(self, save_filename):
         torch.save(self.state_dict(), save_filename)
+        
+    def mlabel_evaluate(src, tgt, future_size=1):
+        pass
+        
+    def mlabel_predict(src, tgt, future_size=1):
+        with torch.no_grad():
+            seq = torch.cat((src, tgt), dim=1)
+            dummy_point = torch.zeros((seq.size(0), 1, seq.size(2))).to(self.device)
+            
+            # Add a dummy point with value 0 to the sequence (the value will be predicted by the model)
+            seq = torch.cat((seq, dummy_point), dim=1)
+
+            # Use the (target_size) last steps of the sequence as the target
+            tgt = seq[:, -self.target_size:]
+
+            # Use the (source_size) steps before the target as the source
+            src = seq[:, -self.target_size - self.source_size:-self.target_size]
+
+            # Calculate the target sequence
+            out = self(src, tgt)
+
+            # Use the last point of the calculated target sequence to replace the dummy point
+            seq[:, -1] = out[:, -1]
+        return seq[:, -future_size:]
 
     def predict(self, src, tgt):
         with torch.no_grad():
@@ -320,7 +373,37 @@ class FluxTransformer(nn.Module):
                 # Use the last point of the calculated target sequence to replace the dummy point
                 seq[:, -1] = out[:, -1]
         return seq[:, -self.future_size:]
+    
+    def show_classification(self, src, tgt, plot_folder='', plot_name='transformer_classifier_results.png'):
+        plot_path = os.path.join(os.getcwd(), plot_folder, plot_name)
+        self.eval()
+        # Timesteps
+        src_t = np.arange(self.source_size)
+        tgt_t = np.arange(self.source_size, self.source_size + self.target_size)
+        ftr_t = np.arange(self.source_size + self.target_size, self.sequence_length)
 
+        # Prediction of the target
+        pred_tgt = self(src, tgt)
+
+        # Prediction further into the future
+        pred_ftr = self.predict(src, tgt)
+
+        fig, ax = plt.subplots(3, 3, figsize=(16, 12))
+
+        for i in range(3):
+            for j in range(3):
+                ax[i, j].plot(src_t, src[3 * i + j, :, 0].cpu().detach().numpy(), label='source')
+                ax[i, j].plot(tgt_t, tgt[3 * i + j, :, 0].cpu().detach().numpy(), label='target')
+                ax[i, j].plot(tgt_t, pred_tgt[3 * i + j, :, 0].cpu().detach().numpy(), label='target_prediction')
+                ax[i, j].plot(ftr_t, ftr[3 * i + j, :, 0].cpu().detach().numpy(), label='future')
+                ax[i, j].plot(ftr_t, pred_ftr[3 * i + j, :, 0].cpu().detach().numpy(), label='future_prediction')
+                ax[i, j].legend(fontsize=8)
+                ax[i, j].set_xlabel('step')
+                ax[i, j].set_ylabel('flux')
+        plt.tight_layout()
+        plt.savefig(plot_path)
+        plt.show()
+        
     def show_example(self, src, tgt, ftr, plot_folder='', plot_name='transformer_results.png'):
         plot_path = os.path.join(os.getcwd(), plot_folder, plot_name)
         self.eval()

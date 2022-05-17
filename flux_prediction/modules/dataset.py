@@ -9,19 +9,20 @@ from torch.utils.data import DataLoader, Dataset
 ###### load dataset ######
 
 def mlabel_train_test_eval(data_dir, test_fraction=0.33, seed=42, device=torch.device("cpu")):
-    train_dset = class_call(data_dir, 
-                            test_fraction=test_fraction,
-                            seed=seed,
-                            device=device)
-    test_dset = class_call(data_dir, set_idx, 
-                           test_fraction=test_fraction,
-                           seed=seed,
-                           test_set=True,
-                           device=device)
-    eval_dset = class_call(data_dir, set_idx, 
-                           test_fraction=test_fraction,
-                           test_set=True, seed=seed+1,
-                           device=device)
+    train_dset = MultiLabelDataset(data_dir, 
+                                   test_fraction=test_fraction,
+                                   seed=seed,
+                                   device=device)
+    test_dset = MultiLabelDataset(data_dir,
+                                  test_fraction=test_fraction,
+                                  seed=seed,
+                                  test_set=True,
+                                  device=device)
+    eval_dset = MultiLabelDataset(data_dir,
+                                  test_fraction=test_fraction,
+                                  test_set=True, 
+                                  seed=seed+1,
+                                  device=device)
     return train_dset, test_dset, eval_dset
 
 def flux_train_test_eval(data_dir, set_idx, add_gradients=False,
@@ -99,7 +100,6 @@ def normalize(sequences):
 class MultiLabelDataset(Dataset):
     def __init__(self, data_dir,
                  test_set=False, test_fraction=0.33, seed=42, device=torch.device("cpu")):
-        self.set_dir = f'set_{set_idx}'
         self.device = device
 
         # Load data.
@@ -108,33 +108,67 @@ class MultiLabelDataset(Dataset):
         
         if test_set:
             sources = np.load(os.path.join(data_dir, 'val_input.npy'))
-            targets = np.load(os.path.join(data_dir, 'val_input.npy'))
+            targets = np.load(os.path.join(data_dir, 'val_target.npy'))
         else:
             sources = np.load(os.path.join(data_dir, 'train_input.npy'))
             targets = np.load(os.path.join(data_dir, 'train_target.npy'))
-            
-        self.source_size = len(sources[0])
-        self.target_size = len(targets[0])
 
         # Store data shape
+        self.source_size = len(sources[0])
+        self.target_size = len(targets[0])
+        self.n_lables = len(targets[0][0])
         self.n_sequences = len(sources)
         self.sequence_length = self.source_size + self.target_size #this is source_size + target_size
-        self.n_features = len(sources[0][0])
+        self.unpad_n_features = len(sources[0][0])
+        self.n_features = len(sources[0][0]) + len(targets[0][0])
 
         # The source for the model will be the sequence, but with its target data points masked.
         # sources = sequences.copy()
         # sources[:, -target_size - future_size:-future_size, :] = 0
 
-
         # Determine random training and test indices
+        """
         self.test_size = int(test_fraction * self.n_sequences)
         np.random.seed(seed)
         test_sample = np.random.choice(np.arange(self.n_sequences), self.test_size, replace=False)
         train_sample = np.delete(np.arange(self.n_sequences), test_sample, axis=0)
+        self.source_data, self.target_data = self.pad_data(sources[test_sample], targets[test_sample])
+        """
+        self.source_data, self.target_data = self.pad_data(sources, targets)
+        
+    def pad_data(self, sources, targets):
+        out_sources = np.pad(sources, ((0,0), (0,0), (0,self.n_lables)), mode='constant')
+        out_targets = np.pad(targets, ((0,0), (0,0), (self.unpad_n_features,0)), mode='constant')
+        return out_sources, out_targets
+        
+    def get_source_size(self):
+        return self.source_size
+    
+    def get_target_size(self):
+        return self.target_size
+    
+    def get_future_size(self):
+        return None
+    
+    def get_sequence_length(self):
+        return self.sequence_length
+    
+    def get_n_features(self):
+        return self.n_features
+                             
+    def get_n_lables(self):
+        return self.n_lables
 
-        # Select train or test set
-        self.source_data = sources[test_sample]
-        self.target_data = targets[test_sample]
+    def __len__(self):
+        return self.n_sequences
+
+    def __getitem__(self, idx):
+        src = self.source_data[idx]
+        tgt = self.target_data[idx]
+
+        src = torch.FloatTensor(src).to(self.device)
+        tgt = torch.FloatTensor(tgt).to(self.device)
+        return src, tgt
         
 
 ###### dummy dataset classes ######
