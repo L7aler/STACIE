@@ -4,23 +4,27 @@ import os
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 
 ###### load dataset ######
 
-def mlabel_train_test_eval(data_dir, test_fraction=0.33, seed=42, device=torch.device("cpu")):
-    train_dset = MultiLabelDataset(data_dir, 
+def mlabel_train_test_eval(data_dir, n_labels=5, test_fraction=0.66, seed=42, device=torch.device("cpu")):
+    train_dset = MultiLabelDataset(data_dir,
+                                   n_labels=n_labels,
                                    test_fraction=test_fraction,
                                    seed=seed,
                                    device=device)
     test_dset = MultiLabelDataset(data_dir,
+                                  n_labels=n_labels,
                                   test_fraction=test_fraction,
                                   seed=seed,
                                   test_set=True,
                                   device=device)
     eval_dset = MultiLabelDataset(data_dir,
+                                  n_labels=n_labels,
                                   test_fraction=test_fraction,
-                                  test_set=True, 
+                                  val_set=True, 
                                   seed=seed+1,
                                   device=device)
     return train_dset, test_dset, eval_dset
@@ -98,8 +102,8 @@ def normalize(sequences):
 ###### multilabel dataset ######
 
 class MultiLabelDataset(Dataset):
-    def __init__(self, data_dir,
-                 test_set=False, test_fraction=0.33, seed=42, device=torch.device("cpu")):
+    def __init__(self, data_dir, n_labels=5,
+                 test_set=False, val_set=False, test_fraction=0.66, seed=42, device=torch.device("cpu")):
         self.device = device
 
         # Load data.
@@ -107,8 +111,15 @@ class MultiLabelDataset(Dataset):
         # Targets have shape [n_sequences, target_length, n_features]
         
         if test_set:
+            sources = np.load(os.path.join(data_dir, 'test_input.npy'))
+            targets = np.load(os.path.join(data_dir, 'test_target.npy'))
+        elif val_set:
+            """
             sources = np.load(os.path.join(data_dir, 'val_input.npy'))
             targets = np.load(os.path.join(data_dir, 'val_target.npy'))
+            """
+            sources = np.load(os.path.join(data_dir, 'test_input.npy'))
+            targets = np.load(os.path.join(data_dir, 'test_target.npy'))
         else:
             sources = np.load(os.path.join(data_dir, 'train_input.npy'))
             targets = np.load(os.path.join(data_dir, 'train_target.npy'))
@@ -116,30 +127,92 @@ class MultiLabelDataset(Dataset):
         # Store data shape
         self.source_size = len(sources[0])
         self.target_size = len(targets[0])
-        self.n_lables = len(targets[0][0])
-        self.n_sequences = len(sources)
+        self.n_labels = n_labels
+        self.str_n_sequences = len(sources)
         self.sequence_length = self.source_size + self.target_size #this is source_size + target_size
-        self.unpad_n_features = len(sources[0][0])
-        self.n_features = len(sources[0][0]) + len(targets[0][0])
-
-        # The source for the model will be the sequence, but with its target data points masked.
-        # sources = sequences.copy()
-        # sources[:, -target_size - future_size:-future_size, :] = 0
+        self.n_features = len(sources[0][0]) #+ len(targets[0][0])
 
         # Determine random training and test indices
-        """
-        self.test_size = int(test_fraction * self.n_sequences)
-        np.random.seed(seed)
-        test_sample = np.random.choice(np.arange(self.n_sequences), self.test_size, replace=False)
-        train_sample = np.delete(np.arange(self.n_sequences), test_sample, axis=0)
-        self.source_data, self.target_data = self.pad_data(sources[test_sample], targets[test_sample])
-        """
-        self.source_data, self.target_data = self.pad_data(sources, targets)
+        if n_labels < 5:
+            targets = self.relabel_data(targets)
+        self.minvalue, self.maxvalue = self.min_max_value(sources)   
+        # Determine random training and test indices
+        if not val_set:
+            self.test_size = int(test_fraction * self.str_n_sequences)
+            np.random.seed(seed)
+            test_sample = np.random.choice(np.arange(self.str_n_sequences), self.test_size, replace=False)
+            train_sample = np.delete(np.arange(self.str_n_sequences), test_sample, axis=0)
+            self.source_data = sources[test_sample]
+            self.target_data = targets[test_sample]
+        else:
+            self.source_data = sources
+            self.target_data = targets
         
+        
+        #if not test_set and not val_set:
+        #self.source_data = self.apply_mask(sources[test_sample])
+        #else:
+        
+        
+        self.n_sequences = len(self.source_data)
+        
+    def relabel_data(self, targets):
+        new_targets = np.zeros((self.str_n_sequences, self.target_size, self.n_labels))
+        for i, tgt in enumerate(targets):
+            old_label_idx = np.argmax(tgt[0])
+            if old_label_idx > 0:
+                if self.n_labels == 2:
+                    new_label_idx = 1
+                elif self.n_labels == 3:
+                    if old_label_idx < 3:
+                        new_label_idx = 1
+                    else:
+                        new_label_idx = 2
+                new_targets[i,0,new_label_idx] = 1.
+        return new_targets
+          
     def pad_data(self, sources, targets):
-        out_sources = np.pad(sources, ((0,0), (0,0), (0,self.n_lables)), mode='constant')
+        out_sources = np.pad(sources, ((0,0), (0,0), (0,self.n_labels)), mode='constant')
         out_targets = np.pad(targets, ((0,0), (0,0), (self.unpad_n_features,0)), mode='constant')
         return out_sources, out_targets
+    
+    def min_max_value(self, sources):
+        flat = np.ravel(sources)
+        minvalue = np.amin(flat)
+        maxvalue = np.amax(flat)
+        return minvalue, maxvalue
+    
+    def apply_mask(self, sources, masked=0.15, masked_ratios=[0.8, 0.1, 0.1]):
+        """
+        masks the sequence values, masked values are 15%
+        of these values 80% are set to -inf, 10% to a random value and 10% to the actual value
+        """
+        n_elements = self.source_size**2
+        n_idx = int(masked*n_elements)
+        
+        print(sources[0][0])
+        
+        for batch in tqdm(sources, desc='Masking sources', total=len(sources)):
+            for timestep in batch:
+                idx_l = [i for i in np.random.permutation(self.n_features)]
+                idx_l = idx_l[:n_idx]
+
+                for idx in idx_l:
+                    if torch.rand(1) < 0.8:
+                        timestep[idx] = float('-inf')
+                    else:
+                        if torch.rand(1) < 0.5:
+                            timestep[idx] = (self.maxvalue - self.minvalue) * np.random.random_sample() + self.minvalue
+                        else:
+                            pass
+        
+        return sources
+    
+    def get_minvalue(self):
+        return self.minvalue
+    
+    def get_maxvalue(self):
+        return self.maxvalue
         
     def get_source_size(self):
         return self.source_size
@@ -156,8 +229,8 @@ class MultiLabelDataset(Dataset):
     def get_n_features(self):
         return self.n_features
                              
-    def get_n_lables(self):
-        return self.n_lables
+    def get_n_labels(self):
+        return self.n_labels
 
     def __len__(self):
         return self.n_sequences
