@@ -15,18 +15,36 @@ import pandas as pd
 import seaborn as sns
 from typing import Tuple
 
-from sklearn.metrics import roc_curve, auc, roc_auc_score
-#from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import label_binarize
-#from sklearn.multiclass import OneVsRestClassifier
-
 
 ###### define loss functions ######
+
+def make_weighted_mse_loss(output_size, device):
+    """
+    Creates a mse loss functions that gives weights to the errors based on their position in the sequence. Predictions
+    further in time are expected to have larger errors, so we apply smaller weights to later predictions to focus the
+    learning on earlier timesteps.
+
+    Parameters
+    output_size : length of the sequence to be predicted
+    device : device
+
+    Returns
+    A weighted mse loss function
+    """
+    weights = torch.arange(1, output_size + 1)
+    weights = torch.flip(weights, dims=[0]).unsqueeze(0).unsqueeze(-1).to(device)
+
+    def weighted_mse_loss(outputs, targets):
+        return torch.mean(weights * (outputs[..., :1] - targets[..., :1]) ** 2)
+
+    return weighted_mse_loss
+
 
 class F1Score:
     """
     Class for f1 calculation in Pytorch.
     """
+
     def __init__(self, average: str = 'weighted', requires_grad: bool = True, device=torch.device("cpu")):
         """
         Init.
@@ -129,8 +147,37 @@ class F1Score:
         if self.requires_grad:
             f1_score.requires_grad = True
 
-        return 1 - f1_score
+        return (1 - f1_score)
 
+"""
+def f1(y_true, y_pred):
+    y_pred = K.round(y_pred)
+    tp = K.sum(K.cast(y_true*y_pred, 'float'), axis=0)
+    tn = K.sum(K.cast((1-y_true)*(1-y_pred), 'float'), axis=0)
+    fp = K.sum(K.cast((1-y_true)*y_pred, 'float'), axis=0)
+    fn = K.sum(K.cast(y_true*(1-y_pred), 'float'), axis=0)
+
+    p = tp / (tp + fp + K.epsilon())
+    r = tp / (tp + fn + K.epsilon())
+
+    f1 = 2*p*r / (p+r+K.epsilon())
+    f1 = tf.where(tf.is_nan(f1), tf.zeros_like(f1), f1)
+    return K.mean(f1)
+
+def f1_loss(y_true, y_pred):
+    
+    tp = K.sum(K.cast(y_true*y_pred, 'float'), axis=0)
+    tn = K.sum(K.cast((1-y_true)*(1-y_pred), 'float'), axis=0)
+    fp = K.sum(K.cast((1-y_true)*y_pred, 'float'), axis=0)
+    fn = K.sum(K.cast(y_true*(1-y_pred), 'float'), axis=0)
+
+    p = tp / (tp + fp + K.epsilon())
+    r = tp / (tp + fn + K.epsilon())
+
+    f1 = 2*p*r / (p+r+K.epsilon())
+    f1 = tf.where(tf.is_nan(f1), tf.zeros_like(f1), f1)
+    return 1 - K.mean(f1)
+"""
 
 ###### encoding classes ######
 
@@ -236,23 +283,19 @@ class FlareClassificationTransformer(nn.Module):
     device: device to use
     """
 
-    def __init__(self, train_dset, test_dset,
-                 model_dim=32, nheads=1, encoding='pos', time_encoding_dim=8, 
+    def __init__(self, train_dset, test_dset, #multilabel=False,
+                 model_d=32, nheads=1, encoding='pos', time_encoding_dim=8, 
                  f1_loss=False, optimizer='adam', bert=False,
-                 enc_layers=1, epochs=100,
-                 batch_size=64, learning_rate=1e-4, gamma=0.99, 
-                 device=torch.device("cpu")):
+                 enc_layers=1, dec_layers=1, prediction_distance=1, epochs=100,
+                 batch_size=64, learning_rate=1e-4, gamma=0.99, device=torch.device("cpu")):
         
         super(FlareClassificationTransformer, self).__init__()
+        #self.multilabel = multilabel
         self.f1_loss = f1_loss
-        self.device = device
-        self.bert = bert
         self.epochs = epochs
-        self.prediction_distance = 1
-        
-        # transformer parameters
-        self.nheads = nheads
-        self.enc_layers = enc_layers
+        self.device = device
+        self.prediction_distance = prediction_distance
+        self.bert = bert
 
         #Load datasets
         self.train_data = DataLoader(train_dset, batch_size=batch_size)
@@ -262,12 +305,19 @@ class FlareClassificationTransformer(nn.Module):
         self.sequence_length = train_dset.get_sequence_length()
         self.target_size = train_dset.get_target_size()
         self.data_in_dim = train_dset.get_n_features()
+        """
+        if not self.multilabel:
+            self.data_out_dim = self.data_in_dim
+            self.future_size = train_dset.get_future_size()
+            self.source_size = self.sequence_length - self.target_size - self.future_size #?????
+        else:
+        """
         self.source_size = 10
         self.data_out_dim = self.data_in_dim
         self.n_labels = train_dset.get_n_labels()
 
         # Feature dimension the transformer will use
-        self.model_dim = model_dim
+        self.model_dim = model_d
         
         #set time encoding dim
         self.time_encoding_dim = time_encoding_dim
@@ -277,46 +327,67 @@ class FlareClassificationTransformer(nn.Module):
         self.positional_encoding, self.delay_buffer = self.set_encoding(encoding, data_dim=self.data_in_dim, model_dim=self.model_dim,
                                                                         time_encoding_dim=self.time_encoding_dim, device=self.device)
         
+        # Transformer model (pytorch's implementation of the transformer)
+        """
+        if not self.multilabel:
+            # Mask for the target
+            self.tgt_mask = self._generate_square_subsequent_mask(self.target_size).to(self.device)
+            self.transformer = nn.Transformer(d_model=self.model_dim, nhead=nheads, num_encoder_layers=enc_layers,
+                                              num_decoder_layers=dec_layers, dropout=0.2, batch_first=True)
+            self.decoder = nn.Linear(self.model_dim, self.data_out_dim)
+            self.loss_fn = nn.MSELoss(reduction='mean')
+            self.loss_str = 'mse'
+        else:
+        """
         #min and max value of inputs, needed for multilabel masking
         self.minvalue = train_dset.get_minvalue()
         self.maxvalue = train_dset.get_maxvalue()
 
-        # Transformer model (pytorch's implementation of the transformer)
+        #no target mask needed (target is not used on forward)
+        self.tgt_mask = None
+        flat_dim = self.model_dim*self.source_size
+        dense1_out_dim = self.source_size * self.data_out_dim
+
+        #transformer
         if self.bert:
             bert_name = 'bert-mini_bert_params_' + str(self.n_labels)
             self.transformer = BertForSequenceClassification.from_pretrained(os.path.join(os.getcwd(), 'model_params', bert_name))
-        else:   
-            self.encoder_layer = nn.TransformerEncoderLayer(d_model=self.model_dim, nhead=self.nheads, 
-                                                            dropout=0.2, batch_first=True)
-            self.transformer = nn.TransformerEncoder(self.encoder_layer, num_layers=self.enc_layers)
+
+            #for param in self.transformer.bert.parameters():
+                #param.requires_grad = False
+            #for w, b in zip(self.transformer.bert.classifier.weight, self.transformer.bert.classifier.bias):
+                #w.requires_grad = False
+                #b.requires_grad = False
+            #self.resize_layer = nn.Linear([16, 10, 64], [16, 10, 768])
+        else:
+            self.encoder_layer = nn.TransformerEncoderLayer(d_model=self.model_dim, nhead=nheads, dropout=0.2,
+                                                            batch_first=True)
+            self.transformer = nn.TransformerEncoder(self.encoder_layer, num_layers=enc_layers)
 
             #classifier
-            flat_dim = self.model_dim*self.source_size
-            
-            self.dropout1 = nn.Dropout(0.2)
+            self.dropout = nn.Dropout(0.1)
             self.flatten = nn.Flatten(start_dim=1)
             self.dense1 = nn.Linear(flat_dim, flat_dim)
             self.activ1 = nn.Tanh()
-            self.dropout2 = nn.Dropout(0.2)
             self.dense2 = nn.Linear(flat_dim, flat_dim)
             self.activ2 = nn.LeakyReLU()
-            self.dropout3 = nn.Dropout(0.2)
             self.norm = nn.LayerNorm(flat_dim)
             self.classifier = nn.Linear(flat_dim, self.n_labels)
 
             self.softmax = nn.Softmax(dim=1) #needed only for evaluation
-            
-            # weight initialization (I just copied this, don't know if it helps much)
-            # self.init_weights()
 
         if self.f1_loss:
             self.loss_fn = F1Score(average='macro', device=device)
+            #self.loss_fn = F1Score(num_classes=self.n_labels, average='macro')
             self.loss_str = '1 - f1 score'
         else:
-            crossentr_weights = torch.Tensor(train_dset.get_class_weights()).to(self.device)
-            self.loss_fn = nn.CrossEntropyLoss(weight=crossentr_weights, reduction='mean')
+            self.loss_fn = nn.CrossEntropyLoss(reduction='mean')
             self.loss_str = 'cross entropy'
         
+        if not self.bert:
+            # weight initialization (I just copied this, don't know if it helps much)
+            self.init_weights()
+
         # Loss, optimizer and learning rate scheduler
         self.optim_str = optimizer
         if self.optim_str == 'adam':
@@ -337,13 +408,6 @@ class FlareClassificationTransformer(nn.Module):
         self.train_f1 = []
         self.test_f1 = []
         
-        #saved as logs
-        self.norm_cmt = None
-        self.not_norm_cmt = None
-        self.crep = None
-        self.eval_tgt = None
-        self.eval_out_prob = None
-        
     def set_encoding(self, encoding, data_dim=None, model_dim=None, time_encoding_dim=None, device=None):
         if encoding == 'pos':
             positional_encoding = nn.Sequential(nn.Linear(data_dim, model_dim), 
@@ -357,40 +421,82 @@ class FlareClassificationTransformer(nn.Module):
             positional_encoding = nn.Sequential(TimeDelay(dim=time_encoding_dim, delay=1),
                                                 nn.Linear(time_encoding_dim * data_dim, model_dim))
             delay_buffer = time_encoding_dim
+            
         return positional_encoding, delay_buffer
 
     def init_weights(self):
         initrange = 0.1
-        for name, param in self.named_parameters():
-            try:
-                param.bias.data.zero_()
-                param.weight.data.uniform_(-initrange, initrange)
-            except:
-                print(name)
+        if self.multilabel:
+            if self.bert:
+                print(dir(self.transformer.bert))
+                self.transformer.bert.data.zero_()
+                self.transformer.bert.data.uniform_(-initrange, initrange)
+            else:
+                self.dense1.bias.data.zero_()
+                self.dense1.weight.data.uniform_(-initrange, initrange)
+                self.dense2.bias.data.zero_()
+                self.dense2.weight.data.uniform_(-initrange, initrange)
+        else:
+            self.decoder.bias.data.zero_()
+            self.decoder.weight.data.uniform_(-initrange, initrange)
 
-    def forward(self, src):
+    def forward(self, src, tgt=None):
+        """
+        if not self.multilabel:
+            # Concatenate the source and target
+            seq = torch.cat((src, tgt), dim=1)
+        else:
+        """
+        seq = src
+        #print(seq.shape)
+
         # Add positional encoding to each point in the sequence (this also changes the feature dimension to d_model)
-        seq = self.positional_encoding(src)
+        seq = self.positional_encoding(seq)
 
+        # Use the (source_size) first steps as the source
+        """
+        if not self.multilabel:
+            src = seq[:, :self.source_size - self.delay_buffer]
+
+            # (!) Use the points (target_size - 1) until the second to last point as the decoder input
+            decoder_input = seq[:, -self.target_size - self.prediction_distance :-self.prediction_distance]
+
+            # Transformer model magic (out has the same shape as decoder_input)
+            # The tgt_mask is the mask for decoder_input
+            output = self.transformer(src, decoder_input, tgt_mask=self.tgt_mask)
+            output = self.decoder(output)
+        else:
+        """
         if self.bert:
-            output = self.transformer(inputs_embeds=seq, attention_mask=None)
+            #output = self.resize_layer(
+            output = self.transformer(inputs_embeds=seq)
             output = output.logits[:, None, :]
-            output = output[:, 0]
         else:
             #src_mask = self._generate_dynamic_random_mask(self.source_size)
             src_mask = None
             output = self.transformer(seq, src_mask)
-            output = self.dropout1(output)
+
+        # Part of alternative model
+        # out = self.transformer_encoder(src, self.src_mask)
+        # out = out[:, -self.target_size:]
+
+        # Change the feature dimension back to [flux, area]
+        #if self.multilabel and not self.bert:
+        if not self.bert:
+            output = self.dropout(output)
             output = self.flatten(output)
             output = self.dense1(output)
             output = self.activ1(output)
-            output = self.dropout2(output)
             output = self.dense2(output)
             output = self.activ2(output)
-            output = self.dropout3(output)
             output = self.norm(output)
             output = self.classifier(output)
-       
+            
+        if self.bert:
+            output = output[:, 0]
+        if self.f1_loss and not self.bert:
+            output = self.predict_labels(output)
+            
         return output
 
     def _generate_square_subsequent_mask(self, sz):
@@ -432,21 +538,20 @@ class FlareClassificationTransformer(nn.Module):
         n_test_batches = len(self.test_data)
         
         for epoch in range(self.epochs):
-            print(f'+++ Epoch {epoch+1} +++')
-            
-            ###### Training ######
-            
             self.train()
             train_loss = []
+            
             train_pred_lbl_list = []
             train_tgt_lbl_list = []
+
+            ###### Training ######
             
+            #if self.multilabel:
+            print(f'+++ Epoch {epoch+1} +++')
             for (src, tgt) in tqdm(self.train_data, desc='Training ', total=n_train_batches, ascii=' >='):
                 self.optimizer.zero_grad()
                 output = self(src)
                 tgt = self.labels_from_target(tgt)
-                if self.f1_loss:
-                    output = self.predict_labels(output)
 
                 loss = self.loss_fn(output, tgt)
 
@@ -457,12 +562,30 @@ class FlareClassificationTransformer(nn.Module):
                 train_loss.append(tmp_loss)
                 
                 #labels for f1 score
-                if self.f1_loss:
-                    pred_labels = output
-                else:
-                    pred_labels = self.predict_labels(output)
+                pred_labels = self.predict_labels(output)
                 train_tgt_lbl_list.extend(tgt.tolist())
                 train_pred_lbl_list.extend(pred_labels.tolist())
+                
+            """
+                tmp_loss = loss.item()
+                #if self.f1_loss:
+                #    tmp_loss = loss.item() + 1
+                train_loss.append(tmp_loss)
+
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.parameters(), 0.5)
+                self.optimizer.step()
+                    
+            else:
+                for (src, tgt, _) in tqdm(self.train_data, desc=f'Epoch {epoch}', total=n_train_batches, ascii=' >='):
+                    self.optimizer.zero_grad()
+                    output = self(src, tgt=tgt)
+                    loss = self.loss_fn(output, tgt) #change to 
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.parameters(), 0.5)
+                    self.optimizer.step()
+                    train_loss.append(loss.item())
+            """
             
             current_mean_train_loss = np.mean(train_loss)
             self.mean_train_loss.append(current_mean_train_loss)
@@ -473,15 +596,16 @@ class FlareClassificationTransformer(nn.Module):
 
             self.eval()
             test_loss = []
+            
             test_pred_lbl_list = []
             test_tgt_lbl_list = []
 
+            # Validation
             with torch.no_grad():
+                #if self.multilabel:
                 for (src, tgt) in tqdm(self.test_data, desc='Testing  ', total=n_test_batches, ascii=' >='):
                     output = self(src)
                     tgt = self.labels_from_target(tgt)
-                    if self.f1_loss:
-                        output = self.predict_labels(output)
 
                     loss = self.loss_fn(output, tgt)
                     
@@ -489,12 +613,16 @@ class FlareClassificationTransformer(nn.Module):
                     test_loss.append(tmp_loss)
                     
                     #labels for f1 score
-                    if self.f1_loss:
-                        pred_labels = output
-                    else:
-                        pred_labels = self.predict_labels(output)
+                    pred_labels = self.predict_labels(output)
                     test_tgt_lbl_list.extend(tgt.tolist())
                     test_pred_lbl_list.extend(pred_labels.tolist())
+                """
+                else:
+                    for (src, tgt, _) in tqdm(self.test_data, desc='Testing  ', total=n_test_batches, ascii=' >='):
+                        output = self(src, tgt)
+                        loss = self.loss_fn(output, tgt)
+                        test_loss.append(loss.item())
+                """
 
             current_mean_test_loss = np.mean(test_loss)
             self.mean_test_loss.append(current_mean_test_loss)
@@ -502,15 +630,16 @@ class FlareClassificationTransformer(nn.Module):
             self.test_f1.append(current_test_f1)
             
             print(f'({self.loss_str})| Train loss:', current_mean_train_loss, '| Test loss:', current_mean_test_loss)
-            print('Train f1:', current_train_f1, '| Test f1:', current_test_f1, '| Learning rate:', self.scheduler.get_last_lr()[0])
+            print('Train f1:', current_train_f1, '| Test f1:', current_test_f1, '| Learning rate: ', self.scheduler.get_last_lr()[0])
             print('')
 
             # Check if the validation loss is smaller than it was for any previous epoch
-            #if current_mean_test_loss < min_loss:
-            #    self.save_model(save_filename)
-            #    min_loss = current_mean_test_loss
+            if current_mean_test_loss < min_loss:
+                self.save_model(save_filename)
+                min_loss = current_mean_test_loss
 
             # Adjust the learning rate
+            # print(self.scheduler.get_last_lr())
             self.scheduler.step()
 
     def load_model(self, save_filename):
@@ -522,154 +651,132 @@ class FlareClassificationTransformer(nn.Module):
     def predict_labels(self, prob):
         label_idx = torch.argmax(prob, dim=1)
         return label_idx
+    """
+    def predict(self, src, tgt):
+        with torch.no_grad():
+            seq = torch.cat((src, tgt), dim=1)
+            dummy_point = torch.zeros((seq.size(0), 1, seq.size(2))).to(self.device)
+            for _ in range(self.future_size):
+                # Add a dummy point with value 0 to the sequence (the value will be predicted by the model)
+                seq = torch.cat((seq, dummy_point), dim=1)
+
+                # Use the (target_size) last steps of the sequence as the target
+                tgt = seq[:, -self.target_size:]
+
+                # Use the (source_size) steps before the target as the source
+                src = seq[:, -self.target_size - self.source_size:-self.target_size]
+
+                # Calculate the target sequence
+                out = self(src, tgt)
+
+                # Use the last point of the calculated target sequence to replace the dummy point
+                seq[:, -1] = out[:, -1]
+        return seq[:, -self.future_size:]
+    
+    def predict_labels(self, pred_tgt):
+        if not self.bert:
+            pred_tgt = self.softmax(pred_tgt)
+            dim=1
+        else:
+            dim=2
+            
+        label_idx = torch.argmax(pred_tgt, dim=dim)
+        
+        if self.bert:
+            label_idx = label_idx[:, 0]
+        
+        return label_idx
+    """
     
     def labels_from_target(self, tgt):
         tgt = torch.argmax(tgt, dim=2)
         tgt = torch.flatten(tgt)
         return tgt
     
-    #def class_report(self, tgt_labels, pred_labels):
-    #    rep_str = classification_report(tgt_labels, pred_labels)#, output_dict=True)
-    #    return rep_str 
+    def class_report(self, tgt_labels, pred_labels):
+        rep_str = classification_report(tgt_labels, pred_labels)#, output_dict=True)
+        return rep_str 
     
-    def plot_confusion_matrix(self, eval_data, plot_folder='', plot_name='', show=True):
-        plot_path = os.path.join(os.getcwd(), plot_folder, plot_name+'_conf_matrix.png')
+    def calc_f1(self, tgt_labels, pred_tgt):
+        pred_labels = self.predict_labels(pred_tgt)
+        f1 = f1_score(tgt_labels.detach().cpu(), pred_labels.detach().cpu())
+        return f1
+    
+    def plot_confusion_matrix(self, eval_data, plot_folder='', plot_name='transformer_confusion_matrix.png'):
+        plot_path = os.path.join(os.getcwd(), plot_folder, plot_name)
         label_idx_list = []
         tgt_list = []
-        prob_list = []
         
         self.eval()
         with torch.no_grad():
             for (src, tgt) in tqdm(eval_data, desc='Evaluating ', total=len(eval_data), ascii=' >='):
                 pred_tgt = self(src)
-                norm_prob = self.softmax(pred_tgt)
                 tgt = self.labels_from_target(tgt)
                 #if not self.f1_loss:
-                label_idx = self.predict_labels(norm_prob)
-                #label_idx = self.predict_labels(pred_tgt)
+                label_idx = self.predict_labels(pred_tgt)
 
                 tgt_list.extend(tgt.tolist())
                 label_idx_list.extend(label_idx.tolist())
-                prob_list.extend(norm_prob.tolist())
             
-        norm_cmt = confusion_matrix(tgt_list, label_idx_list, normalize='true')
-        not_norm_cmt = confusion_matrix(tgt_list, label_idx_list)
-        rep_str = classification_report(tgt_list, label_idx_list)
+        cmt = confusion_matrix(tgt_list, label_idx_list, normalize='true')
+        rep_str = self.class_report(tgt_list, label_idx_list)
+        print('+++ Model evaluation +++')
         print(rep_str)
         
-        self.norm_cmt = norm_cmt.tolist()
-        self.not_norm_cmt = not_norm_cmt.tolist()
-        self.crep = classification_report(tgt_list, label_idx_list, output_dict=True)
-        self.eval_tgt = tgt_list
-        self.eval_out_prob = prob_list
-        
         if self.n_labels == 5:
-            df_cm = pd.DataFrame(norm_cmt, index = ['No flare', 'C', 'B', 'M', 'X'],
+            df_cm = pd.DataFrame(cmt, index = ['No flare', 'C', 'B', 'M', 'X'],
                                  columns = ['No flare', 'C', 'B', 'M', 'X'])
         elif self.n_labels == 3:
-            df_cm = pd.DataFrame(norm_cmt, index = ['No flare', 'C+B', 'M+X'],
+            df_cm = pd.DataFrame(cmt, index = ['No flare', 'C+B', 'M+X'],
                                  columns = ['No flare', 'C+B', 'M+X'])
         elif self.n_labels == 2:
-            df_cm = pd.DataFrame(norm_cmt, index = ['No flare', 'Flare'],
+            df_cm = pd.DataFrame(cmt, index = ['No flare', 'Flare'],
                                  columns = ['No flare', 'Flare'])
-            
         plt.figure(figsize = (10,7))
         sns.heatmap(df_cm, cmap="Blues", annot=True)
-        
         plt.savefig(plot_path)
-        if show:
-            plt.show()
-        
-        fpr = dict()
-        tpr = dict()
-        roc_auc = dict()
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-        lw = 2
-        plot_path2 = os.path.join(os.getcwd(), plot_folder, plot_name+'_roc.png')
-        
-        prob_array = np.array(prob_list)
-        
-        if self.n_labels == 2:
-            #only one roc curve
-            #print(tgt_list)
-            #prob_array = np.array(prob_list)
-            current_y_score = prob_array[:, 1] #according to documentation y_score has to be probabilities of the positive class
-            fpr[0], tpr[0], _ = roc_curve(tgt_list, current_y_score)
-            roc_auc[0] = auc(fpr[0], tpr[0])
-            fpr["micro"], tpr["micro"], _ = roc_curve(np.array(tgt_list).ravel(), current_y_score.ravel())
-            roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
-            
-            ax.plot(fpr[0], tpr[0], lw=2, label="ROC curve (area = %0.2f)" % roc_auc[0])          
+        plt.show()
 
-        else:
-            #multiple roc curves
-            classes = [i for i in range(self.n_labels)]
-
-            lin_tgt = label_binarize(tgt_list, classes=classes)
-            print(lin_tgt)
-            #prob_array = np.array(prob_list)
-            #lin_out = label_binarize(prob_list, classes=classes)
-
-            for i in range(self.n_labels):
-                current_y_true = lin_tgt[:, i]
-                current_y_score = prob_array[:, i]
-                print(current_y_true)
-                fpr[i], tpr[i], _ = roc_curve(current_y_true, current_y_score)
-                roc_auc[i] = auc(fpr[i], tpr[i])
-
-            fpr["micro"], tpr["micro"], _ = roc_curve(lin_tgt.ravel(), prob_array.ravel())
-            roc_auc["micro"] = auc(fpr["micro"], tpr["micro"])
-
-            # First aggregate all false positive rates
-            all_fpr = np.unique(np.concatenate([fpr[i] for i in range(self.n_labels)]))
-
-            # Then interpolate all ROC curves at this points
-            mean_tpr = np.zeros_like(all_fpr)
-            for i in range(self.n_labels):
-                mean_tpr += np.interp(all_fpr, fpr[i], tpr[i])
-
-            # Finally average it and compute AUC
-            mean_tpr /= self.n_labels
-
-            fpr["macro"] = all_fpr
-            tpr["macro"] = mean_tpr
-            roc_auc["macro"] = auc(fpr["macro"], tpr["macro"])
-
-            # Plot all ROC curves
-            label_micro = "micro-average ROC curve (area = {0:0.2f})".format(roc_auc["micro"])
-            label_macro = "macro-average ROC curve (area = {0:0.2f})".format(roc_auc["macro"])
-
-            ax.plot(fpr["micro"], tpr["micro"], label=label_micro, linestyle=":", linewidth=2*lw)
-            ax.plot(fpr["macro"], tpr["macro"], label=label_macro, linestyle=":", lw=2*lw)
-
-            #colors = cycle(["aqua", "darkorange", "cornflowerblue"])
-            #for i, color in zip(range(n_classes), colors):
-            for i in range(self.n_labels):
-                label_class = "ROC curve of class {0} (area = {1:0.2f})".format(i, roc_auc[i])
-                ax.plot(fpr[i], tpr[i], lw=lw, label=label_class)
-
-        #ax.plot([0, 1], [0, 1], "k--", lw=lw)
-        ax.plot([0, 1], [0, 1], lw=2, linestyle="--")
-        plt.xlim([0.0, 1.0])
-        plt.ylim([0.0, 1.05])
-        plt.xlabel("False Positive Rate")
-        plt.ylabel("True Positive Rate")
-        plt.title("ROC")
-        plt.legend(loc="lower right")
-            
-        plt.savefig(plot_path2)
-        if show:
-            plt.show()
-            
-        
-    def plot_roc(self, plot_folder='', plot_name='transformer_loss.png'):
-        pass
-        
-    def plot_loss(self, plot_folder='', plot_name='transformer_loss.png', show=True):
+    def show_example(self, src, tgt, ftr, plot_folder='', plot_name='transformer_results.png'):
         plot_path = os.path.join(os.getcwd(), plot_folder, plot_name)
-        epoch_array = np.arange(self.epochs)
+        self.eval()
+        # Timesteps
+        src_t = np.arange(self.source_size)
+        tgt_t = np.arange(self.source_size, self.source_size + self.target_size)
+        ftr_t = np.arange(self.source_size + self.target_size, self.sequence_length)
+
+        # Prediction of the target
+        pred_tgt = self(src, tgt)
+
+        # Prediction further into the future
+        pred_ftr = self.predict(src, tgt)
+
+        fig, ax = plt.subplots(3, 3, figsize=(16, 12))
+
+        for i in range(3):
+            for j in range(3):
+                ax[i, j].plot(src_t, src[3 * i + j, :, 0].cpu().detach().numpy(), label='source')
+                ax[i, j].plot(tgt_t, tgt[3 * i + j, :, 0].cpu().detach().numpy(), label='target')
+                ax[i, j].plot(tgt_t, pred_tgt[3 * i + j, :, 0].cpu().detach().numpy(), label='target_prediction')
+                ax[i, j].plot(ftr_t, ftr[3 * i + j, :, 0].cpu().detach().numpy(), label='future')
+                ax[i, j].plot(ftr_t, pred_ftr[3 * i + j, :, 0].cpu().detach().numpy(), label='future_prediction')
+                ax[i, j].legend(fontsize=8)
+                ax[i, j].set_xlabel('step')
+                ax[i, j].set_ylabel('flux')
+        plt.tight_layout()
+        plt.savefig(plot_path)
+        plt.show()
         
+    def plot_loss(self, plot_folder='', plot_name='transformer_loss.png'):
+        plot_path = os.path.join(os.getcwd(), plot_folder, plot_name)
+        """
+        if self.bert:
+            epoch_array = np.arange(10)
+            self.mean_train_loss.extend([i for i in range(10)])
+            self.mean_test_loss.extend([i for i in range(10)])
+        else:
+        """
+        epoch_array = np.arange(self.epochs)
         fig = plt.figure()
         ax = fig.add_subplot(111)
         ax.plot(epoch_array, self.mean_train_loss, label='train loss')
@@ -677,75 +784,11 @@ class FlareClassificationTransformer(nn.Module):
         ax.plot(epoch_array, self.train_f1, label='train f1')
         ax.plot(epoch_array, self.test_f1, label='test f1')
        
+        #if self.multilabel:
         ax.set_title('{} labels, optimizer: {}'.format(self.n_labels, self.optim_str))
+            
         ax.set_xlabel('epochs')
         ax.set_ylabel('loss: ' + self.loss_str)
         ax.legend(loc='upper right')
-        
         plt.savefig(plot_path)
-        if show:
-            plt.show()
-        
-    def save_logs(self, log_folder='', log_name=''):
-        #log_path = os.path.join(os.getcwd(), log_folder, log_name)
-        
-        #len of these entries is 4
-        save_dict_1 = self.crep
-        
-        accuracy_row = dict()
-        accuracy_row['precision'] = 0
-        accuracy_row['recall'] = 0
-        accuracy_row['f1-score'] = save_dict_1['accuracy']
-        accuracy_row['support'] = save_dict_1['macro avg']['support']
-        
-        save_dict_1['accuracy'] = accuracy_row
-        str_1 = 'class_report_'
-        log_path_1 = os.path.join(os.getcwd(), log_folder, str_1+log_name+'_log.csv')
-        
-        #len of these entries is epochs
-        save_dict_2 = dict()
-        save_dict_2['train_crossentropy_loss'] = self.mean_train_loss
-        save_dict_2['test_crossentropy_loss'] = self.mean_test_loss
-        save_dict_2['train_f1_score'] = self.train_f1
-        save_dict_2['test_f1_score'] = self.test_f1
-        str_2 = 'loss_score_epoch_'
-        log_path_2 = os.path.join(os.getcwd(), log_folder, str_2+log_name+'_log.csv')
-        
-        #len of these entries is 2
-        save_dict_3 = dict()
-        save_dict_3['norm_cmt'] = self.norm_cmt
-        save_dict_3['not_norm_cmt'] = self.not_norm_cmt
-        str_3 = 'conf_matrix_'
-        log_path_3 = os.path.join(os.getcwd(), log_folder, str_3+log_name+'_log.csv')
-        
-        #len of these entries is len(test_dset)
-        save_dict_4 = dict()
-        save_dict_4['eval_target'] = self.eval_tgt
-        save_dict_4['eval_out_prob'] = self.eval_out_prob
-        str_4 = 'eval_tgt_prob_'
-        log_path_4 = os.path.join(os.getcwd(), log_folder, str_4+log_name+'_log.csv')
-        
-        #print(save_dict_1)
-        
-        """
-        for key in save_dict.keys():
-            print('key:', key)
-            try:
-                print(len(save_dict[key]))
-            except:
-                print('len is 0, entry:', save_dict[key])
-        #print(save_dict)
-        """
-        
-        df1 = pd.DataFrame.from_dict(save_dict_1)
-        df1.fillna("-")
-        df1.to_csv(log_path_1, index=False)
-        
-        df2 = pd.DataFrame.from_dict(save_dict_2)
-        df2.to_csv(log_path_2, index=False)
-        
-        df3 = pd.DataFrame.from_dict(save_dict_3)
-        df3.to_csv(log_path_3, index=False)
-        
-        df4 = pd.DataFrame.from_dict(save_dict_4)
-        df4.to_csv(log_path_4, index=False)
+        plt.show()

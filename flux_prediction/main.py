@@ -16,32 +16,29 @@ if __name__ == "__main__":
     ###### define parser ######
     
     parser = argparse.ArgumentParser()
+    parser.add_argument('--add-data', 
+                        help='Adds additional data from unused evaluation set (no flare series) to the training set', 
+                        action='store_true')
+    parser.add_argument('--downsample-data', 
+                        help='Reduces the dataset based on the lowest class element count', 
+                        action='store_true')
     parser.add_argument('--load', 
-                        help='Loads a pretrained network', 
+                        help='Loads a pretrained network and evaluates without training', 
                         action='store_true')
     parser.add_argument('--bert', 
                         help='Loads a pretrained bert network, for multilabel classification', 
                         action='store_true')
-    parser.add_argument('--poly-data', 
-                        help='Creates and uses a polynomial training set', 
-                        action='store_true')
-    parser.add_argument('--sine-data', 
-                        help='Creates and uses a sinusoidal training set', 
-                        action='store_true')
     parser.add_argument('--f1-loss', 
                         help='When classifying, changes the loss function from cross entropy to f1 score', 
                         action='store_true')
-    parser.add_argument('--mlabel', 
+    parser.add_argument('--labels', 
                         help='Trains the transformer to predict flare types with given number of labels, values: 2, 3, 5(default)', 
                         nargs=1)
     parser.add_argument('--optim', 
                         help='Determines the optimizer: sgd, adamw, adam(default)', 
                         nargs=1)
-    parser.add_argument('--data-sequence', 
-                        help='Number, size and target of function sequences, default: 1000, 100, 25', 
-                        nargs=3)
-    parser.add_argument('--flux-idx', 
-                        help='Loads a flux dataset with given index, can be 1, 2, or 3. Default: None', 
+    parser.add_argument('--enc-layers', 
+                        help='Number of encoding layers, default: 4', 
                         nargs=1)
     parser.add_argument('--model-dim', 
                         help='Dimention of the network, default: 64', 
@@ -65,10 +62,10 @@ if __name__ == "__main__":
 
     ###### parse arguments ######
     
+    ADD_DATA = args.add_data
+    DOWNSAMPLE_DATA = args.downsample_data
     LOAD = args.load
     BERT = args.bert
-    POLY_DATA = args.poly_data
-    SINE_DATA = args.sine_data
     F1_LOSS = args.f1_loss
     
     if LOAD:
@@ -76,36 +73,27 @@ if __name__ == "__main__":
     else:
         TRAIN = True
         
-    if args.mlabel == None:
+    if args.labels == None:
         NLABELS = 5
-        MLABEL = True
     else:
-        NLABELS = int(args.mlabel[0])
-        MLABEL = True
+        NLABELS = int(args.labels[0])
         
     if args.optim == None:
         OPTIM = 'adam'
     else:
         OPTIM = str(args.optim[0])
-    
-    if args.data_sequence == None:
-        N_SEQUENCES = 1000
-        SEQ_SOURCE_SIZE = 100
-        SEQ_TARGET_SIZE = 25
-    else:
-        N_SEQUENCES = int(args.data_sequence[0])
-        SEQ_SOURCE_SIZE = int(args.data_sequence[1])
-        SEQ_TARGET_SIZE = int(args.data_sequence[2])
-    
-    if args.flux_idx == None:
-        FLUX_IDX = args.flux_idx
-    else:
-        FLUX_IDX = int(args.flux_idx[0])
         
     if args.model_dim == None:
         MODEL_DIM = 64
     else:
         MODEL_DIM = int(args.model_dim[0])
+    if BERT:
+        MODEL_DIM = 256
+        
+    if args.enc_layers == None:
+        ENC_LAYERS = 4
+    else:
+        ENC_LAYERS = int(args.enc_layers[0])
         
     if args.nheads == None:
         NHEADS = 4
@@ -131,46 +119,16 @@ if __name__ == "__main__":
         OUT_NAME = ''
     else:
         OUT_NAME = str(args.out_name[0])
-
-    FLUX_DATA_DIR = os.path.join(os.getcwd(), 'data', 'magnetic_flux_area_data')
-    LSTM_DATA_DIR = os.path.join(os.getcwd(), 'data', 'lstm_data', 'multi_label_classification')
-    
-    DEV = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    
-    t_encoding_dim = 8
-    e_layers = 4
-    d_layers = 4
-    
-    ###### load dataset ######
-
-    if SINE_DATA or POLY_DATA:
-        FTR_SIZE = SEQ_TARGET_SIZE
-        if SINE_DATA:
-            DSET_TYPE = 'sin'
-            transformer_save_file = os.path.join(os.getcwd(), 'model_params', 'sinusoid_transformer_params')
-        if POLY_DATA:
-            DSET_TYPE = 'pol'
-            transformer_save_file = os.path.join(os.getcwd(), 'model_params', 'poly_transformer_params')
-            
-        train_dset, test_dset, eval_dset = dst.example_train_test_eval(DSET_TYPE, 
-                                                                       n_sequences=N_SEQUENCES, source_size=SEQ_SOURCE_SIZE, 
-                                                                       target_size=SEQ_TARGET_SIZE, 
-                                                                       future_size=FTR_SIZE, add_noise=True, seed=42, device=DEV)
-        eval_data = DataLoader(eval_dset, batch_size=BATCH_SIZE)
-        TARGET_SIZE = SEQ_TARGET_SIZE
-          
-    if not SINE_DATA and not POLY_DATA and FLUX_IDX is not None:
-        transformer_save_file = os.path.join(os.getcwd(), 'model_params', 'flux_transformer_params')
-        train_dset, test_dset, eval_dset = dst.flux_train_test_eval(FLUX_DATA_DIR, FLUX_IDX, 
-                                                                    seed=12, device=DEV)
-        eval_data = DataLoader(eval_dset, batch_size=BATCH_SIZE)
-        TARGET_SIZE = train_dset.get_target_size()
         
-    if MLABEL:
-        transformer_save_file = os.path.join(os.getcwd(), 'model_params', f'mlabel_{NLABELS}_transformer_params')
-        train_dset, test_dset, eval_dset = dst.mlabel_train_test_eval(LSTM_DATA_DIR, n_labels=NLABELS, seed=12, device=DEV)
-        eval_data = DataLoader(eval_dset, batch_size=BATCH_SIZE)
-        TARGET_SIZE = train_dset.get_target_size()
+    if F1_LOSS:
+        loss_str = 'f1 score'
+    else:
+        loss_str = 'cross entropy'
+
+    FLARE_DATA_DIR = os.path.join(os.getcwd(), 'data', 'lstm_data', 'multi_label_classification')
+    DEV = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    TIME_ENCODING_DIM = 1
+    TARGET_SIZE = 1
         
     if OPTIM == 'adam' or OPTIM == 'adamw':
         lr = 2e-5
@@ -179,54 +137,68 @@ if __name__ == "__main__":
     
     print('')
     
-    if POLY_DATA:
-        print('Training transformer with polynomial dataset')
-    elif SINE_DATA:
-        print('Training transformer with sinusoidal dataset')
-    elif MLABEL:
+    if BERT:
+        print('Training bert-mini for flare class prediction, with {} labels'.format(NLABELS))
+    else:
         print('Training transformer for flare class prediction, with {} labels'.format(NLABELS))
-    elif FLUX_IDX is not None:
-        print('Training transformer with flux dataset, set {}'.format(FLUX_IDX))
         
+    ###### load dataset ######
+
+    transformer_save_file = os.path.join(os.getcwd(), 'model_params', f'mlabel_{NLABELS}_transformer_params')
+    train_dset, test_dset, val_dset = dst.mlabel_train_test_val(FLARE_DATA_DIR, n_labels=NLABELS, seed=12, device=DEV,
+                                                                test_fraction=1.,
+                                                                add_data=ADD_DATA, downsample=DOWNSAMPLE_DATA)
+    
+    print('+++ Training dataset +++')
+    train_dset.print_classes()
     print('')
     
-    print('Device: {}\n'.format(DEV))
-    print('+++ Transformer parameters +++')
-    print('Epochs: {}\nTarget size: {}\nModel dimension: {}'.format(EPOCHS, TARGET_SIZE, MODEL_DIM))
-    print('Heads: {}\nBatch size: {}\nLearning rate: {}'.format(NHEADS, BATCH_SIZE, lr))
+    print('+++ Validation dataset +++')
+    val_dset.print_classes()
+    print('')
+    
+    print('+++ Test dataset +++')
+    test_dset.print_classes()
+    print('')
+    
+    print('+++ Model parameters +++')
+    
+    if BERT:
+        print(f'Dimension : {MODEL_DIM}')
+    else:
+        print(f'Heads : {NHEADS}\nDimension : {MODEL_DIM}\nEncoding layers : {ENC_LAYERS}')
+    
+    print(f'Encoder : {ENCODER}\nLoss function : {loss_str}\nOptimizer : {OPTIM}\nLearning rate : {lr}')
+    print(f'Batch size : {BATCH_SIZE}\nEpochs : {EPOCHS}\nDevice : {DEV}\nOutput name : {OUT_NAME}') 
+        
         
     ##### load the model ######
     
-    model = trf.FlareClassificationTransformer(train_dset, test_dset, bert=BERT, #multilabel=MLABEL, 
-                                f1_loss=F1_LOSS, optimizer=OPTIM, model_d=MODEL_DIM, nheads=NHEADS, encoding=ENCODER,
-                                time_encoding_dim=t_encoding_dim, enc_layers=e_layers, dec_layers=d_layers,
-                                prediction_distance=TARGET_SIZE, epochs=EPOCHS, learning_rate=lr, gamma=0.97, device=DEV).to(DEV)
+    model = trf.FlareClassificationTransformer(train_dset, val_dset, bert=BERT, 
+                                f1_loss=F1_LOSS, optimizer=OPTIM, model_dim=MODEL_DIM, nheads=NHEADS, encoding=ENCODER,
+                                time_encoding_dim=TIME_ENCODING_DIM, enc_layers=ENC_LAYERS, batch_size=BATCH_SIZE,
+                                epochs=EPOCHS, learning_rate=lr, gamma=0.97, device=DEV).to(DEV)
 
+    
     ###### Train or load the model ######
     
+    print('')
     if TRAIN:
+        print('+++ Training model +++')
         print('')
-        model.train_model(transformer_save_file)#, load_cp=True)
-        if SINE_DATA:
-            print('Model trained with sinusoidal dataset\nNumber of sequences: {}, length: {}'.format(N_SEQUENCES, SEQ_SOURCE_SIZE))
-        elif POLY_DATA:
-            print('Model trained with polynomial dataset\nNumber of sequences: {}, length: {}'.format(N_SEQUENCES, SEQ_SOURCE_SIZE))
-        else:
-            print('Model trained with flux dataset\nIndex: {}'.format(FLUX_IDX))
-        print('Encoder: {}'.format(ENCODER))
+        model.train_model(transformer_save_file)
+        
     if LOAD:
         if BERT:
             pass
         else:
+            print('+++ Loading model +++')
             model.load_model(transformer_save_file)
-  
+    print('')
 
     ###### Plot some examples ######
-    
-    if MLABEL:
-        model.plot_confusion_matrix(eval_data, plot_folder='plots', plot_name=OUT_NAME+'_conf_matrix.png')
-        model.plot_loss(plot_folder='plots', plot_name=OUT_NAME+'_classifier_loss.png')
-    else:
-        test_src, test_tgt, test_ftr = next(iter(eval_data))
-        model.show_example(test_src, test_tgt, test_ftr, plot_folder='plots')
-        model.plot_loss(plot_folder='plots')
+    print('+++ Model evaluation +++')
+    test_data = DataLoader(test_dset, batch_size=BATCH_SIZE)
+    model.plot_confusion_matrix(test_data, plot_folder='plots', plot_name=OUT_NAME, show=False)
+    model.plot_loss(plot_folder='plots', plot_name=OUT_NAME+'_classifier_loss.png', show=False)
+    model.save_logs(log_folder='logs', log_name=OUT_NAME)

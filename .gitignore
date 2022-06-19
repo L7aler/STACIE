@@ -6,5 +6,6 @@
 /flux_prediction/.ipynb_checkpoints
 /flux_prediction/data
 /flux_prediction/plots
+/flux_prediction/logs
 /flux_prediction/model_params
 /flux_prediction/modules/__pycache__

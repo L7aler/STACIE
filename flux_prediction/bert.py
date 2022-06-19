@@ -1,5 +1,5 @@
 import os
-from transformers import BertForSequenceClassification,  AutoModel, AutoConfig
+from transformers import BertForSequenceClassification, AutoModel, AutoConfig
 
 def save_bert(base_name="prajjwal1/bert-mini", model_name='bert-mini', param_name='bert_params', n_labels=5):
     
@@ -22,4 +22,4 @@ def save_bert(base_name="prajjwal1/bert-mini", model_name='bert-mini', param_nam
         bert = AutoModel.from_config(config)
         bert.save_pretrained(save_file)
 
-save_bert(param_name='bert_params', n_labels=3)
+save_bert(param_name='bert_params', n_labels=5)
