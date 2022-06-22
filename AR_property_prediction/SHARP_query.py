@@ -104,8 +104,13 @@ for i, harp_num_set in enumerate([train_harp_nums, test_harp_nums]):
 
 # Create a train and test dataset with resampled and normalized features
 
+data_path = './data'
+
+if not os.path.exists(data_path):
+    os.mkdir(data_path)
+
 set_dir = 'set_5'  # dataset identifier
-set_path = os.path.join('./data', set_dir)
+set_path = os.path.join(data_path, set_dir)
 
 if not os.path.exists(set_path):
     os.mkdir(set_path)
