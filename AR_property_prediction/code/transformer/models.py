@@ -202,7 +202,6 @@ class FluxTransformer(nn.Module):
         self.optimizer = optim.NAdam([{'params': self.parameters()}], lr=learning_rate)
 
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=1, gamma=gamma)
-        # self.scheduler = torch.optim.lr_scheduler.CyclicLR(self.optimizer, base_lr=1e-4, max_lr=0.1, step_size_up=100)
 
     def init_weights(self):
         initrange = 0.1
@@ -244,11 +243,6 @@ class FluxTransformer(nn.Module):
                                     encoder_hidden_states=out.last_hidden_state,
                                     attention_mask=mask)
             out = self.decoder(out.last_hidden_state)
-
-            # for i in range(5):
-            #     print(out.hidden_states[i].size())
-            # out = out.logits[:, None, :]
-            # out = self.decoder(out)
         elif self.model_id == 'lstm':
             out = self.lstm(src)
         else:

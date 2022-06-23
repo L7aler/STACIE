@@ -48,7 +48,7 @@ plt.rcParams["font.family"] = ["Times New Roman"]
 
 plot_indices = [[10547, 201, 2200], [2244, 2206, 10531], [10504, 2224, 10513]]
 
-data_file = os.path.join(flux_data_dir, 'set_5', 'test_normalized.npy')
+data_file = os.path.join(flux_data_dir, 'set_5', 'validation_normalized.npy')
 sequences = np.load(data_file, allow_pickle=True)[:, :, selected_features]
 
 model.eval()

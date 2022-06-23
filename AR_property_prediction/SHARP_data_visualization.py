@@ -8,7 +8,7 @@ set_dir = 'set_5'
 set_path = os.path.join('./AR_property_prediction_data', set_dir)
 source_size = 40
 
-for i, set_type in enumerate(['train', 'test']):
+for i, set_type in enumerate(['train', 'validation']):
     data = np.load(os.path.join(set_path, f'{set_type}_normalized.npy'))
 
     # Plot feature example

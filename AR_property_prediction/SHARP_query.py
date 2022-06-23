@@ -17,13 +17,10 @@ results_dir = './sharp_queries'
 if not os.path.exists(results_dir):
     os.mkdir(results_dir)
 
-download_data = True
-make_train_test = True
-
 sequence_length = 300
 resample_interval = 5  # use odd numbers only
 shift = 20
-test_fraction = 0.3
+validation_fraction = 0.3
 
 # ======================================================
 # DOWNLOADING DATA
@@ -73,16 +70,16 @@ all_data = all_data.set_index([pd.Index(np.arange(0, len(all_data), 1))])
 harp_nums = all_data['HARPNUM'].unique()
 print("Number of different AR's in the data:", len(harp_nums))
 
-# Divide the active regions among the train and test set
+# Divide the active regions among the train and validation set
 np.random.seed(42)
-test_harp_nums = np.random.choice(harp_nums, int(len(harp_nums) * test_fraction), replace=False)
-train_harp_nums = np.array(list(set(harp_nums) - set(test_harp_nums)))
+validation_harp_nums = np.random.choice(harp_nums, int(len(harp_nums) * validation_fraction), replace=False)
+train_harp_nums = np.array(list(set(harp_nums) - set(validation_harp_nums)))
 
 # Construct one or more data sequences for every active region with sufficient data
-sequences = [[], []]  # train and test
-labels = ['train', 'test']
+sequences = [[], []]  # train and validation
+labels = ['train', 'validation']
 
-for i, harp_num_set in enumerate([train_harp_nums, test_harp_nums]):
+for i, harp_num_set in enumerate([train_harp_nums, validation_harp_nums]):
     pbar = tqdm(harp_num_set, total=len(harp_num_set), desc=f"Creating {labels[i]} sequences")
     tot_sequences = 0
     for harp_num in pbar:
@@ -102,7 +99,7 @@ for i, harp_num_set in enumerate([train_harp_nums, test_harp_nums]):
         tot_sequences += n_sequences
         pbar.set_postfix({'tot_sequences': tot_sequences})
 
-# Create a train and test dataset with resampled and normalized features
+# Create a train and validation dataset with resampled and normalized features
 
 data_path = './data'
 
@@ -120,7 +117,7 @@ n_features = len(all_data.columns.to_list())
 
 for i, set_type in enumerate(labels):
 
-    # Select the train or test sequences
+    # Select the train or validation sequences
     data = np.concatenate(sequences[i])
     save_file = os.path.join(set_path, f'{set_type}_normalized')
 
