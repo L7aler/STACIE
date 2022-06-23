@@ -1,0 +1,8 @@
+How to interpret the one-hot encoding of target:
+-> first entry is no flare
+-> 2nd entry is C flare
+-> 3rd entry is B flare
+-> 4th entry is M flare
+-> 5th entry is X flare
+
+Test input and train input is missing because the files are too long. If interested	in reproducing the result contact us the authors!
