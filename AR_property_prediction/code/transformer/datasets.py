@@ -126,19 +126,19 @@ class FluxDataset(Dataset):
     target_size: size of target sequence we want to predict
     future_size: size of future sequence we want to predict
     add_gradients: whether to add gradients of the features to the features
-    test: whether to return a test dataset (if False, returns train dataset)
+    validation: whether to return a validation dataset (if False, returns train dataset)
     device: on what device to store the data
     """
 
     def __init__(self, data_dir, set_idx=None, source_size=40, target_size=10, future_size=10, add_gradients=False,
-                 test=False, device=torch.device("cpu")):
+                 validation=False, device=torch.device("cpu")):
         self.set_dir = f'set_{set_idx}'
         self.device = device
 
         selected_keys = np.array([0, 1, 2, 3, 4, 7, 9, 10, 11, 12])
 
-        if test:
-            data_file = os.path.join(data_dir, self.set_dir, 'test_normalized.npy')
+        if validation:
+            data_file = os.path.join(data_dir, self.set_dir, 'validation_normalized.npy')
         else:
             data_file = os.path.join(data_dir, self.set_dir, 'train_normalized.npy')
         sequences = np.load(data_file, allow_pickle=True)[:, :, selected_keys]

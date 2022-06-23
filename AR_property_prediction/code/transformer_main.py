@@ -54,17 +54,17 @@ if __name__ == "__main__":
     model.train_model(transformer_save_file, load_cp=False)
 
     if set_id == 'sin':
-        eval_data = DataLoader(SinusoidDataset(n_sequences=100, source_size=src_size, target_size=tgt_size,
-                                               future_size=ftr_size, add_noise=True, seed=14, device=dev),
-                               batch_size=9)
+        val_data = DataLoader(SinusoidDataset(n_sequences=100, source_size=src_size, target_size=tgt_size,
+                                              future_size=ftr_size, add_noise=True, seed=14, device=dev),
+                              batch_size=9)
     elif set_id == 'pol':
-        eval_data = DataLoader(PolynomialDataset(n_sequences=100, source_size=src_size, target_size=tgt_size,
-                                                 future_size=ftr_size, add_noise=True, seed=14, device=dev),
-                               batch_size=9)
+        val_data = DataLoader(PolynomialDataset(n_sequences=100, source_size=src_size, target_size=tgt_size,
+                                                future_size=ftr_size, add_noise=True, seed=14, device=dev),
+                              batch_size=9)
     else:
-        eval_data = DataLoader(FluxDataset(flux_data_dir, set_idx=set_id, source_size=src_size, target_size=tgt_size,
-                                           future_size=ftr_size, test=True, device=dev),
-                               batch_size=bat_size)
+        val_data = DataLoader(FluxDataset(flux_data_dir, set_idx=set_id, source_size=src_size, target_size=tgt_size,
+                                          future_size=ftr_size, validation=True, device=dev),
+                              batch_size=bat_size)
 
-    test_src, test_tgt, test_ftr = next(iter(eval_data))
-    model.show_example(test_src, test_tgt, test_ftr)
+    val_src, val_tgt, val_ftr = next(iter(val_data))
+    model.show_example(val_src, val_tgt, val_ftr)
