@@ -4,7 +4,7 @@
 
 [![DOI](https://zenodo.org/badge/167217584.svg)](https://zenodo.org/badge/latestdoi/167217584)
 
-
+The data can be accessed via the following link: https://drive.google.com/drive/folders/17AGVrWPwl5fMWWMOwvGrN-UtsfltGKt1?usp=sharing
 
 Slic is a fast image classification tool for identifying the large-scale features in a solar dataset. It is based on the [VGG-13 convolutional neural network](https://arxiv.org/abs/1409.1556) (CNN) and has the following architecture:
 
