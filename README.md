@@ -2,7 +2,7 @@
 
 This repository is part of a research project for the course Advances in Deep Learning (2021-2022) at Leiden University. It contains deep learning methods for predicting the activity and magnetic properties on the surface of the Sun. Inspiration for this project was a [paper](https://arxiv.org/abs/1905.13575) and [GitHub repository](https://github.com/bionictoucan/Slic) by Armstrong et al., which presented a deep learning model for classifying images of Solar active regions. The project consists of three parts.
 
-## Armstrong data analysis
+## Armstrong paper data analysis
 
 The original direction of the project was to improve the classifier of Solar active region images. However, upon inspection of the data used by Armstrong et al., we found that the same active regions were included in both training and validation data. As the images from the same active region were generally similar, we verified that redistributing the training and validation data, such that active regions were exclusive to either set, did affect the performance significantly. We have included code for augmenting the original dataset, but ultimately, we shifted the focus of the project to different problems.
 
